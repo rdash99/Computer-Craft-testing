@@ -18,15 +18,16 @@
 local GUI = {}
 GUI.__index = GUI
 
-local Config     = require("StorageOS.config")
-local Logger     = require("StorageOS.logger")
-local Utils      = require("StorageOS.utils")
-local Network    = require("StorageOS.network")
-local Storage    = require("StorageOS.storage")
-local Crafting   = require("StorageOS.crafting")
-local Processing = require("StorageOS.processing")
-local Tasks      = require("StorageOS.tasks")
-local RM         = require("StorageOS.recipes.manager")
+local Config        = require("StorageOS.config")
+local Logger        = require("StorageOS.logger")
+local Utils         = require("StorageOS.utils")
+local Network       = require("StorageOS.network")
+local Storage       = require("StorageOS.storage")
+local Crafting      = require("StorageOS.crafting")
+local Processing    = require("StorageOS.processing")
+local Tasks         = require("StorageOS.tasks")
+local RM            = require("StorageOS.recipes.manager")
+local RecipeScanner = require("StorageOS.recipe_scanner")
 
 -- ── Terminal dimensions ───────────────────────────────────────────────────────
 local W, H = term.getSize()
@@ -329,9 +330,18 @@ local function renderCrafting()
         end
     end
 
+    -- ── Recipe source info row (shows where recipes came from) ────────────────
+    local srcInfo = RecipeScanner.sourceSummary()
+    lines[#lines + 1] = { text = "", fg = G.BODY_FG }
+    lines[#lines + 1] = {
+        text = "── Recipe Sources  [F]=rescan ───────────",
+        fg   = G.DIM_FG,
+    }
+    lines[#lines + 1] = { text = "  " .. srcInfo, fg = G.DIM_FG }
+
     clearLine(CONTENT_TOP, G.TAB_BG)
     writeAt(2, CONTENT_TOP,
-        Utils.pad("Crafting  [Enter]=queue craft  [↑↓]=select", W-2),
+        Utils.pad("Crafting  [Enter]=queue  [↑↓]=select  [F]=rescan recipes", W-2),
         G.TAB_SEL_FG, G.TAB_BG)
     cursor[tab]    = drawList(lines, scrollPos[tab], cursor[tab])
     scrollPos[tab] = math.max(1, cursor[tab] - math.floor(CONTENT_HEIGHT / 2))
@@ -571,6 +581,13 @@ function GUI.run()
                 Storage.scan()
                 Processing.scan()
                 Logger.info("GUI: manual rescan triggered")
+            elseif key == keys.f then
+                -- Re-run the local recipe scanner (picks up new RS/ME patterns,
+                -- JSON files dropped into the recipe data directory, etc.)
+                Logger.info("GUI: recipe rescan triggered by user")
+                RecipeScanner.scan()
+                require("StorageOS.recipes.manager").loadFromDisk()
+                Logger.info("GUI: recipe rescan done, %d recipes total", RM.count())
             elseif key == keys.tab then
                 currentTab = (currentTab % #TABS) + 1
             elseif key == keys.left then

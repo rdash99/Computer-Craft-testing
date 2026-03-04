@@ -5,18 +5,36 @@
 local Config = {}
 
 -- ── Version ──────────────────────────────────────────────────────────────────
-Config.VERSION = "1.1.0"
+Config.VERSION = "1.2.0"
 Config.NAME    = "StorageOS"
 
 -- ── File / directory paths ────────────────────────────────────────────────────
-Config.STORAGE_OS_DIR      = "/StorageOS"
-Config.DATA_DIR            = "/StorageOS/data"
-Config.RECIPE_DIR          = "/StorageOS/recipes"
-Config.RECIPE_FETCHED_DIR  = "/StorageOS/recipes/fetched"  -- cached game recipes
-Config.LOG_FILE            = "/StorageOS/data/system.log"
-Config.CONFIG_FILE         = "/StorageOS/data/settings.dat"
-Config.INV_CACHE_FILE      = "/StorageOS/data/inventory.dat"
-Config.RECIPE_FETCH_META   = "/StorageOS/data/recipe_fetch_meta.dat"
+Config.STORAGE_OS_DIR   = "/StorageOS"
+Config.DATA_DIR         = "/StorageOS/data"
+Config.RECIPE_DIR       = "/StorageOS/recipes"
+Config.LOG_FILE         = "/StorageOS/data/system.log"
+Config.CONFIG_FILE      = "/StorageOS/data/settings.dat"
+Config.INV_CACHE_FILE   = "/StorageOS/data/inventory.dat"
+Config.RECIPE_SCAN_META = "/StorageOS/data/recipe_scan_meta.dat"
+
+-- ── Local recipe discovery ────────────────────────────────────────────────────
+-- Directories scanned for Minecraft-format recipe JSON files.
+-- Files must use the standard Minecraft recipe JSON schema
+-- (minecraft:crafting_shaped, minecraft:smelting, etc.).
+-- Drop any .json recipe files here and they will be loaded on the next scan.
+Config.RECIPE_DATA_DIRS = {
+    "/StorageOS/recipes/data",   -- primary user recipe folder
+    "/recipes",                  -- root-level recipes folder (convenient shortcut)
+}
+
+-- Peripheral type names that expose recipe APIs.
+-- StorageOS probes these first; more entries can be added for custom mods.
+Config.RECIPE_PERIPHERAL_TYPES = {
+    "rsBridge",    -- Advanced Peripherals: Refined Storage bridge
+    "meBridge",    -- Advanced Peripherals: Applied Energistics 2 bridge
+    "rs_bridge",   -- alternate naming some versions use
+    "me_bridge",
+}
 
 -- ── Timing intervals (seconds) ────────────────────────────────────────────────
 Config.SCAN_INTERVAL    = 30   -- full peripheral re-scan
@@ -27,14 +45,6 @@ Config.GUI_REFRESH      = 1    -- GUI redraw interval
 
 -- ── Transfer limits ───────────────────────────────────────────────────────────
 Config.MAX_TRANSFER = 64  -- max items per single pushItems call
-
--- ── Recipe fetching ───────────────────────────────────────────────────────────
--- Minecraft version to pull recipes for.  Must match a branch in misode/mcmeta
--- (format: "{version}-assets", e.g. "1.20.1" → branch "1.20.1-assets").
--- Change this to match your server/client version.
-Config.MC_VERSION         = "1.20.1"
--- Number of simultaneous HTTP requests when fetching recipe files.
-Config.RECIPE_FETCH_BATCH = 16
 
 -- ── Storage priority ─────────────────────────────────────────────────────────
 -- Higher number → preferred destination when distributing items.

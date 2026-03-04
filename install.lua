@@ -30,11 +30,21 @@ local FILES = {
     "StorageOS/logger.lua",
     "StorageOS/network.lua",
     "StorageOS/processing.lua",
+    "StorageOS/recipe_scanner.lua",
     "StorageOS/storage.lua",
     "StorageOS/tasks.lua",
     "StorageOS/utils.lua",
     "StorageOS/recipes/manager.lua",
     "StorageOS/recipes/defaults.lua",
+}
+
+-- Directories to create after downloading files.
+-- These are used by StorageOS at runtime.
+local DIRS = {
+    "/StorageOS/data",
+    "/StorageOS/recipes",
+    "/StorageOS/recipes/data",  -- drop Minecraft recipe JSON files here
+    "/recipes",                  -- root-level shortcut for recipe JSON files
 }
 
 -- ── Helpers ────────────────────────────────────────────────────────────────────
@@ -167,11 +177,7 @@ local function main()
 
     -- Summary
     print("")
-    if fail_count == 0 then
-        colour(colors.lime)
-        print("  ✓ All " .. ok_count .. " files installed successfully!")
-        colour(colors.white)
-    else
+    if fail_count > 0 then
         colour(colors.yellow)
         print(string.format("  Installed: %d   Failed: %d", ok_count, fail_count))
         colour(colors.red)
@@ -182,7 +188,65 @@ local function main()
     print("")
 
     if fail_count == 0 then
-        -- Ask to launch StorageOS immediately
+        -- Create runtime directories
+        print("")
+        colour(colors.cyan)
+        print("Creating directories…")
+        colour(colors.white)
+        for _, dir in ipairs(DIRS) do
+            if not fs.exists(dir) then
+                fs.makeDir(dir)
+                colour(colors.gray)
+                print("  created " .. dir)
+                colour(colors.white)
+            end
+        end
+
+        -- Write a README into the recipe data directory so the user knows it's there
+        local readmePath = "/StorageOS/recipes/data/README.txt"
+        if not fs.exists(readmePath) then
+            local f = fs.open(readmePath, "w")
+            if f then
+                f.write(
+                    "StorageOS – Recipe Data Directory\n" ..
+                    "==================================\n\n" ..
+                    "Drop Minecraft datapack recipe JSON files here and StorageOS\n" ..
+                    "will load them automatically on the next scan (press F in the\n" ..
+                    "Crafting tab, or reboot).\n\n" ..
+                    "Supported recipe types:\n" ..
+                    "  minecraft:crafting_shaped\n" ..
+                    "  minecraft:crafting_shapeless\n" ..
+                    "  minecraft:smelting\n" ..
+                    "  minecraft:blasting\n" ..
+                    "  minecraft:smoking\n" ..
+                    "  minecraft:stonecutting\n\n" ..
+                    "Recipes are also loaded automatically from connected\n" ..
+                    "Refined Storage (rsBridge) and Applied Energistics 2\n" ..
+                    "(meBridge) peripherals via Advanced Peripherals.\n"
+                )
+                f.close()
+            end
+        end
+
+        print("")
+        colour(colors.lime)
+        print("  ✓ All " .. ok_count .. " files installed successfully!")
+        colour(colors.white)
+        print("")
+        colour(colors.cyan)
+        print("  Recipe discovery (automatic, no internet needed):")
+        colour(colors.white)
+        print("  • If you have Refined Storage + Advanced Peripherals,")
+        print("    connect an rsBridge and StorageOS reads all RS patterns.")
+        print("  • If you have AE2 + Advanced Peripherals,")
+        print("    connect an meBridge and StorageOS reads AE2 craftables.")
+        print("  • Drop Minecraft recipe JSON files into:")
+        colour(colors.yellow)
+        print("      /StorageOS/recipes/data/")
+        colour(colors.white)
+        print("    for any other mod recipes.")
+        print("  • Press F in the Crafting tab to re-scan at any time.")
+        print("")
         write("Launch StorageOS now? [Y/n] ")
         local launch = read()
         if launch:lower() ~= "n" then

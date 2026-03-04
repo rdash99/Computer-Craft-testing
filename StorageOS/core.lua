@@ -22,7 +22,7 @@ local Logger        = require("StorageOS.logger")
 local Network       = require("StorageOS.network")
 local Storage       = require("StorageOS.storage")
 local RM            = require("StorageOS.recipes.manager")
-local RecipeFetcher = require("StorageOS.recipe_fetcher")
+local RecipeScanner = require("StorageOS.recipe_scanner")
 local Crafting      = require("StorageOS.crafting")
 local Processing    = require("StorageOS.processing")
 local Tasks         = require("StorageOS.tasks")
@@ -41,81 +41,36 @@ end
 
 -- ── Recipe loading ────────────────────────────────────────────────────────────
 
---- Load recipes at startup.
---- Strategy (in order of preference):
----   1. Load cached game recipes from disk (fast, works offline)
----   2. If no cache, attempt live fetch from misode/mcmeta (requires HTTP)
----   3. If HTTP unavailable, fall back to the bundled defaults.lua
+--- Run the local recipe scanner and report results.
+--- Called at startup and whenever the user requests a re-scan (GUI 'F' key).
 local function loadRecipes()
-    println("Loading recipes…", colors.white)
-    Utils.ensureDir(Config.RECIPE_DIR)
-    Utils.ensureDir(Config.RECIPE_FETCHED_DIR)
+    println("Scanning for recipes…", colors.white)
 
-    -- ── Try disk cache first ──────────────────────────────────────────────────
-    local cached = RecipeFetcher.loadCached()
-    if cached > 0 then
-        local meta = RecipeFetcher.fetchMeta()
-        local verStr = meta and (" (MC " .. (meta.version or "?") .. ")") or ""
-        println(string.format("  Loaded %d recipes from cache%s", cached, verStr), colors.lime)
-        Logger.info("Recipes: %d loaded from disk cache%s", cached, verStr)
-
-        -- Also load any user-defined recipe files from the main recipes dir
-        RM.loadFromDisk()
-        Logger.info("Recipes total: %d", RM.count())
-        return
+    local function progress(source, n)
+        if n > 0 then
+            local labels = {
+                rs       = "Refined Storage",
+                me       = "Applied Energistics 2",
+                generic  = "Peripheral API",
+                json     = "Local JSON files",
+                defaults = "Built-in defaults",
+            }
+            println(string.format("  %-26s  +%d", labels[source] or source, n), colors.gray)
+        end
     end
 
-    -- ── No cache – attempt live fetch ─────────────────────────────────────────
-    if http then
-        println("  No cached recipes – fetching from game data…", colors.yellow)
-        println(string.format("  Source: github.com/misode/mcmeta (MC %s)", Config.MC_VERSION),
-                colors.gray)
-        println("  This may take a few minutes on the first run.", colors.gray)
+    local summary = RecipeScanner.scan(progress)
 
-        local W = term.getSize()
-        local lastPhase = ""
-        local barY = select(2, term.getCursorPos()) + 1
-
-        local function progress(done, total, phase)
-            if phase ~= lastPhase then
-                lastPhase = phase
-                println("  " .. phase, colors.cyan)
-                barY = select(2, term.getCursorPos())
-            end
-            -- Simple inline progress bar
-            local pct = total > 0 and math.floor((done / total) * (W - 14)) or 0
-            term.setCursorPos(1, barY)
-            colour(colors.gray)
-            io.write(string.format("  [%-" .. (W-14) .. "s] %4d/%d",
-                string.rep("=", pct), done, total))
-        end
-
-        local result = RecipeFetcher.fetchAll(Config.MC_VERSION, progress)
-        println("")  -- newline after progress bar
-
-        if result.ok then
-            println(string.format("  Fetched %d recipes (%d skipped)",
-                result.loaded, result.skipped), colors.lime)
-            Logger.info("Recipes fetched: loaded=%d skipped=%d", result.loaded, result.skipped)
-        else
-            println("  Fetch failed: " .. tostring(result.error), colors.red)
-            println("  Falling back to built-in defaults.", colors.yellow)
-            Logger.warn("Recipe fetch failed: %s – using defaults", result.error)
-            local defaults = require("StorageOS.recipes.defaults")
-            RM.add(defaults)
-        end
-    else
-        -- ── HTTP unavailable – use bundled defaults ────────────────────────────
-        println("  HTTP API unavailable – using built-in recipe defaults.", colors.yellow)
-        println("  Enable HTTP in computercraft-common.toml for live recipe data.", colors.gray)
-        Logger.warn("HTTP unavailable – loading default recipes only")
-        local defaults = require("StorageOS.recipes.defaults")
-        RM.add(defaults)
-    end
-
-    -- Load any user-added .lua recipe files from the main recipes directory
+    -- Also load any hand-crafted .lua recipe files the user placed in RECIPE_DIR
     RM.loadFromDisk()
-    Logger.info("Recipes total: %d", RM.count())
+
+    local total = RM.count()
+    if total > 0 then
+        println(string.format("  Total: %d recipes loaded", total), colors.lime)
+    else
+        println("  Warning: no recipes loaded.", colors.yellow)
+    end
+    Logger.info("loadRecipes complete: %d recipes", total)
 end
 
 -- ── Startup ───────────────────────────────────────────────────────────────────
@@ -129,9 +84,14 @@ local function startup()
     print("")
 
     Utils.ensureDir(Config.DATA_DIR)
+    Utils.ensureDir(Config.RECIPE_DIR)
+    for _, dir in ipairs(Config.RECIPE_DATA_DIRS or {}) do
+        Utils.ensureDir(dir)
+    end
+
     Logger.info("=== %s v%s starting ===", Config.NAME, Config.VERSION)
 
-    -- Load recipes (fetch from game data or disk cache)
+    -- Discover recipes from local sources (peripherals + JSON files + defaults)
     loadRecipes()
 
     -- Scan the peripheral network
@@ -206,6 +166,21 @@ local function storageRefreshTask()
     end
 end
 
+--- Periodically re-run the recipe scanner so newly-connected peripherals
+--- (RS/ME bridges added after boot) get their recipes loaded automatically.
+local function recipeScanTask()
+    while true do
+        sleep(Config.SCAN_INTERVAL * 3)  -- every 90 s
+        local prevCount = RM.count()
+        RecipeScanner.scan()
+        RM.loadFromDisk()
+        local newCount = RM.count()
+        if newCount ~= prevCount then
+            Logger.info("recipeScanTask: recipe count changed %d → %d", prevCount, newCount)
+        end
+    end
+end
+
 -- ── Main ──────────────────────────────────────────────────────────────────────
 
 local function main()
@@ -217,6 +192,7 @@ local function main()
     Tasks.add("processing_tick",  processingTickTask, Config.TASK_PRIORITY.NORMAL)
     Tasks.add("craft_queue",      craftQueueTask,     Config.TASK_PRIORITY.NORMAL)
     Tasks.add("storage_refresh",  storageRefreshTask, Config.TASK_PRIORITY.IDLE)
+    Tasks.add("recipe_scan",      recipeScanTask,     Config.TASK_PRIORITY.IDLE)
     Tasks.add("gui",              GUI.run,            Config.TASK_PRIORITY.CRITICAL)
 
     Logger.info("Starting task scheduler with %d tasks", #Tasks.list())
