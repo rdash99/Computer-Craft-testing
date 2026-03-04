@@ -13,7 +13,10 @@ if not fs.exists("/StorageOS/core.lua") then
 end
 
 -- Set up package path so that require("StorageOS.xxx") works from any module
-package.path = "/?.lua;/?/init.lua;" .. (package.path or "")
+-- (package may be nil in some CC:Tweaked environments; core.lua sets it up too)
+if package then
+    package.path = "/?.lua;/?/init.lua;" .. (package.path or "")
+end
 
 -- Hand off to the core
 local ok, err = pcall(dofile, "/StorageOS/core.lua")
