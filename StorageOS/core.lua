@@ -46,6 +46,27 @@ local function startup()
     print("Loading recipes…")
     local defaults = require("StorageOS.recipes.defaults")
     RM.add(defaults)
+
+    -- On first boot, persist all built-in recipes to the recipe directory so:
+    --   a) players can inspect/edit them without touching Lua source, and
+    --   b) any future loadFromDisk() call will pick them up automatically.
+    local firstBootFlag = Config.DATA_DIR .. "/recipes_initialized"
+    if not fs.exists(firstBootFlag) then
+        print("First boot: saving default recipes to disk…")
+        local saved = 0
+        for _, id in ipairs(RM.allIds()) do
+            if RM.saveToDisk(RM.byId(id)) then
+                saved = saved + 1
+            end
+        end
+        -- Write flag so this only runs once
+        local flag = fs.open(firstBootFlag, "w")
+        if flag then flag.write(tostring(saved)); flag.close() end
+        Logger.info("First boot: saved %d default recipes to %s", saved, Config.RECIPE_DIR)
+        print(string.format("  Saved %d recipes to %s", saved, Config.RECIPE_DIR))
+    end
+
+    -- Load any user-added recipe files from disk (skips files already registered)
     RM.loadFromDisk()
     Logger.info("Recipes: %d loaded", RM.count())
 

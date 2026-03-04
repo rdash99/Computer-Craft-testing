@@ -252,10 +252,9 @@ end
 local function renderCrafting()
     local tab    = 3
     local queue  = Crafting.getQueue()
-    local craftable = RM.craftableItems()
     local lines  = {}
 
-    -- Section header
+    -- ── Section 1: Queued jobs ─────────────────────────────────────────────────
     lines[#lines + 1] = { text = "── Queued Jobs ──────────────────────────", fg = G.HIGHLIGHT }
     if #queue == 0 then
         lines[#lines + 1] = { text = "  (queue empty)", fg = G.DIM_FG }
@@ -269,22 +268,71 @@ local function renderCrafting()
         end
     end
 
-    lines[#lines + 1] = { text = "", fg = G.BODY_FG }
-    lines[#lines + 1] = { text = "── Craftable Items ──────────────────────", fg = G.HIGHLIGHT }
-    for _, name in ipairs(craftable) do
-        local short = name:match(":(.+)$") or name
-        local have  = Storage.count(name)
-        lines[#lines + 1] = {
-            text = string.format("  %-30s (have %s)", short, Utils.formatNumber(have)),
-            fg   = G.BODY_FG,
-        }
+    -- ── Section 2: Craftable right now (dynamic, based on live storage) ────────
+    -- craftableNow checks every recipe type (craft, smelt, blast, smoke, create_*)
+    local nowMap  = RM.craftableNow(Storage.count)
+    local nowList = {}
+    for name, recipe in pairs(nowMap) do
+        nowList[#nowList + 1] = { name = name, recipe = recipe }
     end
-    if #craftable == 0 then
+    table.sort(nowList, function(a, b) return a.name < b.name end)
+
+    lines[#lines + 1] = { text = "", fg = G.BODY_FG }
+    lines[#lines + 1] = {
+        text = string.format("── Craftable Now (%d) %s", #nowList,
+            string.rep("─", math.max(0, 39 - #tostring(#nowList)))),
+        fg = G.SUCCESS_FG,
+    }
+    if #nowList == 0 then
+        lines[#lines + 1] = { text = "  (need more materials)", fg = G.DIM_FG }
+    else
+        -- Colour-code by recipe type so the user can see craft vs smelt at a glance
+        local TYPE_COLOUR = {
+            craft            = G.SUCCESS_FG,
+            smelt            = G.WARN_FG,
+            blast            = G.WARN_FG,
+            smoke            = G.WARN_FG,
+            create_pressing  = G.HIGHLIGHT,
+            create_mixing    = G.HIGHLIGHT,
+            create_compacting= G.HIGHLIGHT,
+        }
+        for _, entry in ipairs(nowList) do
+            local short = entry.name:match(":(.+)$") or entry.name
+            local rtype = entry.recipe.type or "craft"
+            local have  = Storage.count(entry.name)
+            lines[#lines + 1] = {
+                text = string.format("  %-28s [%-8s] have %s",
+                    short, rtype, Utils.formatNumber(have)),
+                fg = TYPE_COLOUR[rtype] or G.SUCCESS_FG,
+            }
+        end
+    end
+
+    -- ── Section 3: All recipes (full recipe registry) ──────────────────────────
+    local allItems = RM.craftableItems()
+    lines[#lines + 1] = { text = "", fg = G.BODY_FG }
+    lines[#lines + 1] = { text = "── All Recipes ──────────────────────────", fg = G.HIGHLIGHT }
+    if #allItems == 0 then
         lines[#lines + 1] = { text = "  (no recipes loaded)", fg = G.DIM_FG }
+    else
+        for _, name in ipairs(allItems) do
+            local short   = name:match(":(.+)$") or name
+            local have    = Storage.count(name)
+            local canNow  = nowMap[name] ~= nil
+            -- Dim items that aren't currently craftable; highlight items that are
+            local fg = canNow and G.SUCCESS_FG or G.DIM_FG
+            lines[#lines + 1] = {
+                text = string.format("  %-30s  have %s%s",
+                    short, Utils.formatNumber(have), canNow and "  ✓" or ""),
+                fg = fg,
+            }
+        end
     end
 
     clearLine(CONTENT_TOP, G.TAB_BG)
-    writeAt(2, CONTENT_TOP, Utils.pad("Crafting", W-2), G.TAB_SEL_FG, G.TAB_BG)
+    writeAt(2, CONTENT_TOP,
+        Utils.pad("Crafting  [Enter]=queue craft  [↑↓]=select", W-2),
+        G.TAB_SEL_FG, G.TAB_BG)
     cursor[tab]    = drawList(lines, scrollPos[tab], cursor[tab])
     scrollPos[tab] = math.max(1, cursor[tab] - math.floor(CONTENT_HEIGHT / 2))
 end

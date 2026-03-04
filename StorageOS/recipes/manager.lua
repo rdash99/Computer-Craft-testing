@@ -183,4 +183,34 @@ function RecipeManager.ingredients(recipe)
     return map
 end
 
+--- Return a map of { itemName → recipe } for items that can be produced RIGHT NOW.
+--- An item is "craftable now" when every required ingredient (for the best matching
+--- recipe) is currently available in storage in sufficient quantity.
+---
+--- `getCountFn` is a function(itemName) → number that returns the current stored
+--- count of an item.  Pass `Storage.count` from storage.lua.
+---
+--- All recipe types are checked (craft, smelt, blast, smoke, create_*) so the
+--- result covers both crafting and processing jobs.
+function RecipeManager.craftableNow(getCountFn)
+    local out = {}
+    for name, recipeList in pairs(byOutput) do
+        for _, recipe in ipairs(recipeList) do
+            local ingredients = RecipeManager.ingredients(recipe)
+            local canMake = true
+            for item, needed in pairs(ingredients) do
+                if (getCountFn(item) or 0) < needed then
+                    canMake = false
+                    break
+                end
+            end
+            -- Only record the first (best) matchable recipe per output item
+            if canMake and not out[name] then
+                out[name] = recipe
+            end
+        end
+    end
+    return out
+end
+
 return RecipeManager
