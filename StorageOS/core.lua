@@ -16,83 +16,144 @@ addPath("/?.lua")
 addPath("/?/init.lua")
 
 -- ── Module loading ────────────────────────────────────────────────────────────
-local Config     = require("StorageOS.config")
-local Utils      = require("StorageOS.utils")
-local Logger     = require("StorageOS.logger")
-local Network    = require("StorageOS.network")
-local Storage    = require("StorageOS.storage")
-local RM         = require("StorageOS.recipes.manager")
-local Crafting   = require("StorageOS.crafting")
-local Processing = require("StorageOS.processing")
-local Tasks      = require("StorageOS.tasks")
-local GUI        = require("StorageOS.gui")
+local Config        = require("StorageOS.config")
+local Utils         = require("StorageOS.utils")
+local Logger        = require("StorageOS.logger")
+local Network       = require("StorageOS.network")
+local Storage       = require("StorageOS.storage")
+local RM            = require("StorageOS.recipes.manager")
+local RecipeFetcher = require("StorageOS.recipe_fetcher")
+local Crafting      = require("StorageOS.crafting")
+local Processing    = require("StorageOS.processing")
+local Tasks         = require("StorageOS.tasks")
+local GUI           = require("StorageOS.gui")
+
+-- ── Helpers ───────────────────────────────────────────────────────────────────
+
+local function colour(c)
+    if term.isColour() then term.setTextColor(c) end
+end
+
+local function println(msg, c)
+    colour(c or colors.white)
+    print(msg)
+end
+
+-- ── Recipe loading ────────────────────────────────────────────────────────────
+
+--- Load recipes at startup.
+--- Strategy (in order of preference):
+---   1. Load cached game recipes from disk (fast, works offline)
+---   2. If no cache, attempt live fetch from misode/mcmeta (requires HTTP)
+---   3. If HTTP unavailable, fall back to the bundled defaults.lua
+local function loadRecipes()
+    println("Loading recipes…", colors.white)
+    Utils.ensureDir(Config.RECIPE_DIR)
+    Utils.ensureDir(Config.RECIPE_FETCHED_DIR)
+
+    -- ── Try disk cache first ──────────────────────────────────────────────────
+    local cached = RecipeFetcher.loadCached()
+    if cached > 0 then
+        local meta = RecipeFetcher.fetchMeta()
+        local verStr = meta and (" (MC " .. (meta.version or "?") .. ")") or ""
+        println(string.format("  Loaded %d recipes from cache%s", cached, verStr), colors.lime)
+        Logger.info("Recipes: %d loaded from disk cache%s", cached, verStr)
+
+        -- Also load any user-defined recipe files from the main recipes dir
+        RM.loadFromDisk()
+        Logger.info("Recipes total: %d", RM.count())
+        return
+    end
+
+    -- ── No cache – attempt live fetch ─────────────────────────────────────────
+    if http then
+        println("  No cached recipes – fetching from game data…", colors.yellow)
+        println(string.format("  Source: github.com/misode/mcmeta (MC %s)", Config.MC_VERSION),
+                colors.gray)
+        println("  This may take a few minutes on the first run.", colors.gray)
+
+        local W = term.getSize()
+        local lastPhase = ""
+        local barY = select(2, term.getCursorPos()) + 1
+
+        local function progress(done, total, phase)
+            if phase ~= lastPhase then
+                lastPhase = phase
+                println("  " .. phase, colors.cyan)
+                barY = select(2, term.getCursorPos())
+            end
+            -- Simple inline progress bar
+            local pct = total > 0 and math.floor((done / total) * (W - 14)) or 0
+            term.setCursorPos(1, barY)
+            colour(colors.gray)
+            io.write(string.format("  [%-" .. (W-14) .. "s] %4d/%d",
+                string.rep("=", pct), done, total))
+        end
+
+        local result = RecipeFetcher.fetchAll(Config.MC_VERSION, progress)
+        println("")  -- newline after progress bar
+
+        if result.ok then
+            println(string.format("  Fetched %d recipes (%d skipped)",
+                result.loaded, result.skipped), colors.lime)
+            Logger.info("Recipes fetched: loaded=%d skipped=%d", result.loaded, result.skipped)
+        else
+            println("  Fetch failed: " .. tostring(result.error), colors.red)
+            println("  Falling back to built-in defaults.", colors.yellow)
+            Logger.warn("Recipe fetch failed: %s – using defaults", result.error)
+            local defaults = require("StorageOS.recipes.defaults")
+            RM.add(defaults)
+        end
+    else
+        -- ── HTTP unavailable – use bundled defaults ────────────────────────────
+        println("  HTTP API unavailable – using built-in recipe defaults.", colors.yellow)
+        println("  Enable HTTP in computercraft-common.toml for live recipe data.", colors.gray)
+        Logger.warn("HTTP unavailable – loading default recipes only")
+        local defaults = require("StorageOS.recipes.defaults")
+        RM.add(defaults)
+    end
+
+    -- Load any user-added .lua recipe files from the main recipes directory
+    RM.loadFromDisk()
+    Logger.info("Recipes total: %d", RM.count())
+end
 
 -- ── Startup ───────────────────────────────────────────────────────────────────
 
 local function startup()
     term.clear()
     term.setCursorPos(1, 1)
-    term.setTextColor(colors.cyan)
-    print(string.format("Starting %s v%s…", Config.NAME, Config.VERSION))
-    term.setTextColor(colors.white)
+    colour(colors.cyan)
+    print(string.format("  %s v%s  starting…", Config.NAME, Config.VERSION))
+    colour(colors.white)
+    print("")
 
-    -- Ensure data directories exist
     Utils.ensureDir(Config.DATA_DIR)
-    Utils.ensureDir(Config.RECIPE_DIR)
-
     Logger.info("=== %s v%s starting ===", Config.NAME, Config.VERSION)
 
-    -- Load recipes from disk (defaults.lua is always loaded first)
-    print("Loading recipes…")
-    local defaults = require("StorageOS.recipes.defaults")
-    RM.add(defaults)
+    -- Load recipes (fetch from game data or disk cache)
+    loadRecipes()
 
-    -- On first boot, persist all built-in recipes to the recipe directory so:
-    --   a) players can inspect/edit them without touching Lua source, and
-    --   b) any future loadFromDisk() call will pick them up automatically.
-    local firstBootFlag = Config.DATA_DIR .. "/recipes_initialized"
-    if not fs.exists(firstBootFlag) then
-        print("First boot: saving default recipes to disk…")
-        local saved = 0
-        for _, id in ipairs(RM.allIds()) do
-            if RM.saveToDisk(RM.byId(id)) then
-                saved = saved + 1
-            end
-        end
-        -- Write flag so this only runs once
-        local flag = fs.open(firstBootFlag, "w")
-        if flag then flag.write(tostring(saved)); flag.close() end
-        Logger.info("First boot: saved %d default recipes to %s", saved, Config.RECIPE_DIR)
-        print(string.format("  Saved %d recipes to %s", saved, Config.RECIPE_DIR))
-    end
-
-    -- Load any user-added recipe files from disk (skips files already registered)
-    RM.loadFromDisk()
-    Logger.info("Recipes: %d loaded", RM.count())
-
-    -- Initial network scan
-    print("Scanning network…")
+    -- Scan the peripheral network
+    print("")
+    println("Scanning network…", colors.white)
     Network.scan()
     Logger.info("Network: %d peripherals found", Network.count())
 
-    -- Register attach/detach callbacks
-    Network.onAttach(function(info)
-        Processing.onAttach(info)
-    end)
-    Network.onDetach(function(info)
-        Processing.onDetach(info)
-    end)
+    -- Register attach/detach callbacks so hot-plug updates processors
+    Network.onAttach(function(info) Processing.onAttach(info) end)
+    Network.onDetach(function(info) Processing.onDetach(info) end)
 
-    -- Initial storage scan
-    print("Scanning storage…")
+    -- Scan storage and processors
+    println("Scanning storage…", colors.white)
     Storage.scan()
 
-    -- Initial processing scan
-    print("Scanning processors…")
+    println("Scanning processors…", colors.white)
     Processing.scan()
 
-    Logger.info("Startup complete.")
-    sleep(0.5)
+    Logger.info("Startup complete. %d recipes, %d peripherals.",
+        RM.count(), Network.count())
+    sleep(0.8)
     term.clear()
 end
 
@@ -165,9 +226,9 @@ local function main()
     Logger.info("All tasks exited – shutting down.")
     term.clear()
     term.setCursorPos(1, 1)
-    term.setTextColor(colors.yellow)
+    colour(colors.yellow)
     print(Config.NAME .. " has stopped.")
-    term.setTextColor(colors.white)
+    colour(colors.white)
 end
 
 -- ── Error handling ────────────────────────────────────────────────────────────
@@ -176,11 +237,12 @@ local ok, err = xpcall(main, function(e)
 end)
 
 if not ok then
-    term.setTextColor(colors.red)
+    colour(colors.red)
     printError("\n=== " .. Config.NAME .. " FATAL ERROR ===")
     printError(tostring(err))
-    term.setTextColor(colors.white)
+    colour(colors.white)
     print("\nPress any key to reboot…")
     os.pullEvent("key")
     os.reboot()
 end
+

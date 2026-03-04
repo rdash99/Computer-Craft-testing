@@ -5,16 +5,18 @@
 local Config = {}
 
 -- ── Version ──────────────────────────────────────────────────────────────────
-Config.VERSION = "1.0.0"
+Config.VERSION = "1.1.0"
 Config.NAME    = "StorageOS"
 
 -- ── File / directory paths ────────────────────────────────────────────────────
-Config.STORAGE_OS_DIR  = "/StorageOS"
-Config.DATA_DIR        = "/StorageOS/data"
-Config.RECIPE_DIR      = "/StorageOS/recipes"
-Config.LOG_FILE        = "/StorageOS/data/system.log"
-Config.CONFIG_FILE     = "/StorageOS/data/settings.dat"
-Config.INV_CACHE_FILE  = "/StorageOS/data/inventory.dat"
+Config.STORAGE_OS_DIR      = "/StorageOS"
+Config.DATA_DIR            = "/StorageOS/data"
+Config.RECIPE_DIR          = "/StorageOS/recipes"
+Config.RECIPE_FETCHED_DIR  = "/StorageOS/recipes/fetched"  -- cached game recipes
+Config.LOG_FILE            = "/StorageOS/data/system.log"
+Config.CONFIG_FILE         = "/StorageOS/data/settings.dat"
+Config.INV_CACHE_FILE      = "/StorageOS/data/inventory.dat"
+Config.RECIPE_FETCH_META   = "/StorageOS/data/recipe_fetch_meta.dat"
 
 -- ── Timing intervals (seconds) ────────────────────────────────────────────────
 Config.SCAN_INTERVAL    = 30   -- full peripheral re-scan
@@ -25,6 +27,14 @@ Config.GUI_REFRESH      = 1    -- GUI redraw interval
 
 -- ── Transfer limits ───────────────────────────────────────────────────────────
 Config.MAX_TRANSFER = 64  -- max items per single pushItems call
+
+-- ── Recipe fetching ───────────────────────────────────────────────────────────
+-- Minecraft version to pull recipes for.  Must match a branch in misode/mcmeta
+-- (format: "{version}-assets", e.g. "1.20.1" → branch "1.20.1-assets").
+-- Change this to match your server/client version.
+Config.MC_VERSION         = "1.20.1"
+-- Number of simultaneous HTTP requests when fetching recipe files.
+Config.RECIPE_FETCH_BATCH = 16
 
 -- ── Storage priority ─────────────────────────────────────────────────────────
 -- Higher number → preferred destination when distributing items.
