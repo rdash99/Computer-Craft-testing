@@ -4,6 +4,15 @@ A fully-featured Lua program for the **CC:Tweaked** (ComputerCraft) Minecraft mo
 
 ---
 
+## ⚠️ Install on a Computer, Not a Turtle
+
+StorageOS **must be installed on a regular Advanced Computer** (or standard Computer).  
+**Do not install it on a turtle.**
+
+The computer uses the Wired Modem network to talk to every peripheral — chests, furnaces, turtles, presses, etc. — via the `pushItems`/`pullItems` inventory API.  A turtle is not needed *on* the controller computer; it is an optional *peripheral on the network* used only for shaped/shapeless crafting jobs.
+
+---
+
 ## Features
 
 | Feature | Details |
@@ -11,8 +20,8 @@ A fully-featured Lua program for the **CC:Tweaked** (ComputerCraft) Minecraft mo
 | **Unified Storage** | Tracks every item across all connected inventories in a single indexed view |
 | **Priority System** | Storage Drawers → Barrels → Chests (configurable, higher priority filled first) |
 | **Auto-Ingest** | Polls designated input chests and automatically stores their contents |
-| **Auto-Export** | Push items to output chests on demand |
-| **Crafting** | Shaped & shapeless crafting via a crafting turtle or workbench peripheral |
+| **Item Retrieval** | Select any item in the Storage tab, press `Enter`, enter an amount — items are pushed to your output chest for collection |
+| **Crafting** | Shaped & shapeless crafting via a crafting turtle or workbench peripheral on the network |
 | **Local Recipe Discovery** | Automatically discovers recipes from RS/AE2 peripherals, local JSON files, and built-in defaults — **no internet required**, all installed mods handled |
 | **Multi-Furnace** | Distributes smelting jobs across all furnaces, smokers, and blast furnaces |
 | **Create Support** | Recognises Create mod basins, presses, mixers, funnels, and vaults |
@@ -25,12 +34,64 @@ A fully-featured Lua program for the **CC:Tweaked** (ComputerCraft) Minecraft mo
 
 ## Requirements
 
-- **CC:Tweaked** 1.100+ (Minecraft 1.18+) — an *Advanced Computer* is recommended for colour support
-- At least one inventory peripheral connected via a Wired Modem network
-- *(Optional)* A **Crafting Turtle** or **Workbench** peripheral for crafting support
+- **CC:Tweaked** 1.100+ (Minecraft 1.18+)
+- An **Advanced Computer** *(for colour GUI)* — **not** a turtle
+- A **Wired Modem** on the computer, connected by cable to all peripherals
+- At least one inventory (chest / barrel / Storage Drawer / etc.) on the network
+- An **output chest** labelled `output` on the network — items you retrieve are pushed here
+- *(Optional)* An **input chest** labelled `input` — items placed here are auto-stored
+- *(Optional)* A **Crafting Turtle** on the network for shaped/shapeless crafting
+- *(Optional)* A **Workbench** peripheral as an alternative crafter
 - *(Optional)* Furnaces / Smokers / Blast Furnaces for smelting
 - *(Optional)* **Create** mod peripherals (basins, presses, etc.)
 - *(Optional)* **Advanced Peripherals** + Refined Storage or AE2 for full automatic recipe discovery
+
+---
+
+## Hardware Setup
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Wired Modem Network                         │
+│                                                                 │
+│  ┌──────────────┐   ┌──────────┐   ┌──────────┐   ┌─────────┐ │
+│  │   Advanced   │   │ Storage  │   │  Output  │   │ Crafting│ │
+│  │   Computer   │   │  Chests  │   │  Chest   │   │  Turtle │ │
+│  │  (StorageOS) │   │ Barrels  │   │(labelled │   │(no code │ │
+│  │              │   │ Drawers  │   │"output") │   │needed)  │ │
+│  └──────┬───────┘   └────┬─────┘   └────┬─────┘   └────┬────┘ │
+│         └────────────────┴──────────────┴───────────────┘      │
+│                     Wired Modems + Cable                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Step-by-step wiring
+
+1. Place an **Advanced Computer** anywhere convenient.
+2. Attach a **Wired Modem** to one side of the computer (`Right-click` the modem to activate it — it turns orange).
+3. Run **Networking Cable** from that modem to every inventory you want managed.
+4. Attach a **Wired Modem** to each inventory peripheral (chest, barrel, furnace, etc.) and activate each one.
+5. Use the `peripheral list` command on the computer to confirm all devices appear.
+
+### Labelling chests (anvil or `label set`)
+
+StorageOS recognises chests by their in-game label:
+
+| Label | Purpose |
+|---|---|
+| `output` / `out` / `storage_output` | **Items you retrieve are pushed here** — place this chest where you stand to collect |
+| `input` / `in` / `storage_input` | Items placed here are auto-ingested into storage every 5 s |
+| `fuel` / `furnace_fuel` | Fuel reserved for furnaces |
+
+Label a chest by renaming it with an **anvil**: put the chest in an anvil, type the label (e.g. `output`), take it out, then place it on the cable network.
+
+### The crafting turtle
+
+The crafting turtle **does not run any program**.  It is just a peripheral on the wired network.  StorageOS pushes ingredients into the turtle's crafting grid slots remotely, calls `turtle.craft()` via the peripheral API, then pulls the results back into storage automatically.
+
+- Use a **Crafting Turtle** (turtle with a crafting table upgrade).
+- Connect it to the same Wired Modem network as the computer.
+- Leave the turtle's inventory empty and its program slot blank — StorageOS manages it entirely.
 
 ---
 
@@ -38,7 +99,7 @@ A fully-featured Lua program for the **CC:Tweaked** (ComputerCraft) Minecraft mo
 
 ### One-command install (recommended)
 
-Run the following on your CC:Tweaked computer:
+Run the following on your **Advanced Computer** (not a turtle):
 
 ```
 wget https://raw.githubusercontent.com/rdash99/Computer-Craft-testing/main/install.lua
@@ -169,9 +230,9 @@ The system also re-scans automatically every ~90 seconds to pick up newly-connec
 | Key | Action |
 |---|---|
 | `Tab` / `→` / `←` | Switch between tabs |
-| `↑` / `↓` | Scroll list |
+| `↑` / `↓` | Scroll list / move cursor |
 | `PgUp` / `PgDn` | Fast scroll |
-| `Enter` | Confirm / open action (e.g. craft an item) |
+| `Enter` | Context action (see tab table below) |
 | `R` | Force re-scan network, storage, and processors |
 | `F` | Re-scan recipe sources (peripherals + JSON files) |
 | `Q` | Quit StorageOS |
@@ -180,14 +241,33 @@ The system also re-scans automatically every ~90 seconds to pick up newly-connec
 
 ### Tabs
 
-| Tab | Contents |
-|---|---|
-| **Home** | System overview: item count, peripherals, recipe count, queue depths |
-| **Storage** | Full item list with quantities, sorted alphabetically |
-| **Crafting** | Craftable Now (live inventory check), full recipe list, job queue, recipe source breakdown |
-| **Processing** | Furnace/Create machine status and pending job queue |
-| **Tasks** | Background task status (id, name, priority, state) |
-| **Log** | Live system log with colour-coded severity levels |
+| Tab | `Enter` action | Contents |
+|---|---|---|
+| **Home** | — | System overview: item count, peripherals, recipe count, queue depths |
+| **Storage** | **Retrieve item** — prompts for amount, pushes items to your output chest | Full item list with quantities, sorted alphabetically |
+| **Crafting** | **Queue job** — prompts for amount; routes `craft`-type recipes to the craft queue, all others (smelt, Create, etc.) to the processing queue | Craftable Now (machine + ingredient check), full recipe list with type, job queue, recipe source breakdown |
+| **Processing** | Queue a smelting job by name | Furnace/Create machine status and pending job queue |
+| **Tasks** | — | Background task status (id, name, priority, state) |
+| **Log** | — | Live system log with colour-coded severity levels |
+
+### Retrieving items
+
+1. Navigate to the **Storage** tab with `Tab`.  
+2. Use `↑` / `↓` to highlight the item you want.  
+3. Press `Enter` — a prompt asks *"Retrieve X (have N, 0=all):"*.  
+4. Type the amount (or `0` for everything) and press `Enter`.  
+5. Items are pushed to your **output chest** — walk over and collect them.
+
+> **No output chest?**  Make sure you have a chest on the wired network that is labelled `output` (or `out` / `storage_output`).  See [Hardware Setup](#hardware-setup).
+
+### "Craftable Now" vs "All Recipes"
+
+The **Craftable Now** section only shows items that meet *both* conditions:
+
+1. All required ingredients are currently in storage.
+2. The required machine is present on the network (crafting turtle for `craft`, furnace for `smelt`/`blast`/`smoke`, Create press for `create_pressing`, etc.).
+
+The **All Recipes** section lists every known recipe. Each entry shows the recipe type in brackets (e.g. `[craft]`, `[smelt]`, `[create_pressing]`) so you can see at a glance what machine an item requires. Items that cannot be made right now are shown in grey; items ready to queue are highlighted green.
 
 ---
 

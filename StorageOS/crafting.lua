@@ -65,6 +65,10 @@ local function craftOnTurtle(crafterInfo, recipe, times)
     local crafterName = crafterInfo.name
     local produced    = 0
 
+    -- Clear any leftover items from a previous failed craft attempt so the
+    -- crafting grid slots are guaranteed empty before we begin.
+    Storage.ingestFrom(crafterName)
+
     for _ = 1, times do
         local placed = true
 
@@ -91,6 +95,8 @@ local function craftOnTurtle(crafterInfo, recipe, times)
 
         if not placed then
             Logger.warn("Crafting.craftOnTurtle: failed to fill all ingredient slots")
+            -- Recover any ingredients already placed back into storage
+            Storage.ingestFrom(crafterName)
             break
         end
 
@@ -98,8 +104,14 @@ local function craftOnTurtle(crafterInfo, recipe, times)
         local ok, crafted = pcall(crafterInfo.periph.craft, crafterInfo.periph)
         if ok and crafted then
             produced = produced + (recipe.count or 1)
+            -- Collect the crafted output immediately so those slots are free
+            -- for the next iteration's ingredients (otherwise turtle slots
+            -- remain occupied and subsequent pushes to the same slots fail).
+            Storage.ingestFrom(crafterName)
         else
             Logger.warn("Crafting.craftOnTurtle: craft() returned false or errored")
+            -- Recover any ingredients left in the turtle
+            Storage.ingestFrom(crafterName)
             break
         end
     end
@@ -281,6 +293,11 @@ end
 function Crafting.clearQueue()
     craftQueue = {}
     Logger.info("Crafting.clearQueue: queue cleared")
+end
+
+--- Return true if a crafting turtle or workbench is available on the network.
+function Crafting.hasCrafter()
+    return findCrafter() ~= nil
 end
 
 --- Register a new recipe dynamically (also saves to disk).

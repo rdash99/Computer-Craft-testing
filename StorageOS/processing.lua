@@ -320,4 +320,12 @@ function Processing.getQueue()
     return snap
 end
 
+--- Return true if at least one registered processor can handle `recipeType`.
+function Processing.hasProcessor(recipeType)
+    for _, p in ipairs(processors) do
+        if canHandle(p, recipeType) then return true end
+    end
+    return false
+end
+
 return Processing
