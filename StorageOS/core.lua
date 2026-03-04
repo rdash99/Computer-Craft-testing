@@ -17,6 +17,36 @@ if package then
     addPath("/?/init.lua")
 end
 
+-- ── Require fallback ──────────────────────────────────────────────────────────
+-- In some CC:Tweaked environments (e.g. when loaded via dofile), the global
+-- `require` function is not available.  Provide a minimal implementation that
+-- converts dotted module names to filesystem paths and uses dofile, caching
+-- each module so it is only loaded once (matching standard require behaviour).
+if not require then
+    local _loaded = {}
+    local _NIL = {}  -- sentinel for modules that returned nil
+    _G.require = function(modname)
+        local cached = _loaded[modname]
+        if cached ~= nil then
+            return cached ~= _NIL and cached or nil
+        end
+        -- Try "/StorageOS/config.lua" and "/StorageOS/config/init.lua" style paths
+        local base = "/" .. modname:gsub("%.", "/")
+        local candidates = { base .. ".lua", base .. "/init.lua" }
+        local path
+        for _, p in ipairs(candidates) do
+            if fs.exists(p) then path = p; break end
+        end
+        if not path then
+            error("module '" .. modname .. "' not found (tried: "
+                .. table.concat(candidates, ", ") .. ")", 2)
+        end
+        local result = dofile(path)
+        _loaded[modname] = result ~= nil and result or _NIL
+        return result
+    end
+end
+
 -- ── Module loading ────────────────────────────────────────────────────────────
 local Config        = require("StorageOS.config")
 local Utils         = require("StorageOS.utils")
