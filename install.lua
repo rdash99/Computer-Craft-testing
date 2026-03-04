@@ -105,6 +105,22 @@ local function writeFile(path, content)
     return true
 end
 
+--- Download a file directly to `dest` using the shell `wget` command.
+--- Returns true on success, or false + error string on failure.
+local function wgetDownload(url, dest)
+    local dir = fs.getDir(dest)
+    if dir and dir ~= "" and not fs.exists(dir) then
+        fs.makeDir(dir)
+    end
+    -- Remove an existing file first so wget doesn't append a suffix
+    if fs.exists(dest) then fs.delete(dest) end
+    local ok = shell.run("wget", url, dest)
+    if ok and fs.exists(dest) then
+        return true
+    end
+    return false, "wget failed for: " .. url
+end
+
 -- ── Main installer ─────────────────────────────────────────────────────────────
 
 local function main()
@@ -119,12 +135,10 @@ local function main()
     print_info("Branch : " .. BRANCH)
     print("")
 
-    -- Check for HTTP API
+    -- Check for HTTP API (wget fallback will be used if it is disabled)
     if not http then
-        print_err("The HTTP API is not available.")
-        print("Enable it in computercraft-common.toml:")
-        print("  [http] enabled = true")
-        return
+        print_err("The HTTP API is not available – will use wget for all downloads.")
+        print("")
     end
 
     -- Confirm
@@ -149,8 +163,7 @@ local function main()
         io.write(string.format("  [%2d/%2d] %-45s ", i, #FILES, relPath))
         colour(colors.white)
 
-        -- Skip if file exists and user hasn't asked to overwrite
-        -- (first pass we always download – overwriting is safe and ensures up-to-date)
+        -- Try HTTP API first; fall back to shell wget if it fails.
         local body, err = fetch(url)
         if body then
             local written, werr = writeFile(dest, body)
@@ -167,11 +180,20 @@ local function main()
                 failures[#failures + 1] = relPath .. " – " .. tostring(werr)
             end
         else
-            colour(colors.red)
-            print("FETCH FAIL")
-            colour(colors.white)
-            fail_count = fail_count + 1
-            failures[#failures + 1] = relPath .. " – " .. tostring(err)
+            -- HTTP fetch failed – attempt wget fallback
+            local wok, werr = wgetDownload(url, dest)
+            if wok then
+                colour(colors.lime)
+                print("OK (wget)")
+                colour(colors.white)
+                ok_count = ok_count + 1
+            else
+                colour(colors.red)
+                print("FETCH FAIL")
+                colour(colors.white)
+                fail_count = fail_count + 1
+                failures[#failures + 1] = relPath .. " – " .. tostring(werr)
+            end
         end
     end
 
@@ -263,7 +285,8 @@ local function main()
         colour(colors.red)
         print("Some files failed to download.")
         colour(colors.white)
-        print("Check your HTTP settings and try again.")
+        print("Check your HTTP settings and try again, or use wget:")
+        print("  wget <url> <destination>")
         print("Tip: set http.whitelist = [\"raw.githubusercontent.com\"] in config.")
     end
 end
