@@ -7,13 +7,15 @@
 
 -- ── Package path setup ────────────────────────────────────────────────────────
 -- Allow require("StorageOS.xxx") and require("StorageOS.recipes.yyy")
-local function addPath(p)
-    if not package.path:find(p, 1, true) then
-        package.path = p .. ";" .. package.path
+if package then
+    local function addPath(p)
+        if not package.path:find(p, 1, true) then
+            package.path = p .. ";" .. package.path
+        end
     end
+    addPath("/?.lua")
+    addPath("/?/init.lua")
 end
-addPath("/?.lua")
-addPath("/?/init.lua")
 
 -- ── Module loading ────────────────────────────────────────────────────────────
 local Config        = require("StorageOS.config")
