@@ -127,7 +127,7 @@ Config.GUI = {
     WARN_FG    = colors.yellow,
     ERROR_FG   = colors.red,
     HIGHLIGHT  = colors.orange,
-    DIM_FG     = colors.gray,
+    DIM_FG     = colors.lightGray,
     INPUT_BG   = colors.gray,
     INPUT_FG   = colors.white,
 }

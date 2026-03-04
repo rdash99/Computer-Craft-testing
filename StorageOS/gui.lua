@@ -48,6 +48,8 @@ local inputMode   = false
 local inputBuffer = ""
 local inputPrompt = ""
 local inputCb     = nil
+-- Maps line-index → item name for the crafting tab; rebuilt on each render.
+local craftingItemMap = {}
 
 for i = 1, #TABS do
     scrollPos[i] = 0
@@ -110,7 +112,15 @@ end
 local function drawFooter()
     local y = H
     clearLine(y, G.TAB_BG)
-    local hint = " [Q]uit [R]escan [Tab]switch [\x18\x19]scroll [Enter]select"
+    local tab  = TABS[currentTab]
+    local hint
+    if tab.id == "storage" then
+        hint = " [Q]uit [R]escan [Tab]switch [\x18\x19]scroll [Enter]retrieve"
+    elseif tab.id == "crafting" then
+        hint = " [Q]uit [R]escan [Tab]switch [\x18\x19]scroll [Enter]queue [F]rescan"
+    else
+        hint = " [Q]uit [R]escan [Tab]switch [\x18\x19]scroll [Enter]select"
+    end
     writeAt(1, y, hint:sub(1, W), G.BORDER_FG, G.TAB_BG)
 end
 
@@ -254,6 +264,7 @@ local function renderCrafting()
     local tab    = 3
     local queue  = Crafting.getQueue()
     local lines  = {}
+    craftingItemMap = {}  -- reset line→item mapping for this render
 
     -- ── Section 1: Queued jobs ─────────────────────────────────────────────────
     lines[#lines + 1] = { text = "── Queued Jobs ──────────────────────────", fg = G.HIGHLIGHT }
@@ -269,9 +280,13 @@ local function renderCrafting()
         end
     end
 
-    -- ── Section 2: Craftable right now (dynamic, based on live storage) ────────
-    -- craftableNow checks every recipe type (craft, smelt, blast, smoke, create_*)
-    local nowMap  = RM.craftableNow(Storage.count)
+    -- ── Section 2: Craftable right now ────────────────────────────────────────
+    -- Only list recipes whose required machine is actually present on the network.
+    local function recipeTypeOk(rtype)
+        if rtype == "craft" then return Crafting.hasCrafter() end
+        return Processing.hasProcessor(rtype)
+    end
+    local nowMap  = RM.craftableNow(Storage.count, recipeTypeOk)
     local nowList = {}
     for name, recipe in pairs(nowMap) do
         nowList[#nowList + 1] = { name = name, recipe = recipe }
@@ -285,9 +300,8 @@ local function renderCrafting()
         fg = G.SUCCESS_FG,
     }
     if #nowList == 0 then
-        lines[#lines + 1] = { text = "  (need more materials)", fg = G.DIM_FG }
+        lines[#lines + 1] = { text = "  (need more materials or machines)", fg = G.DIM_FG }
     else
-        -- Colour-code by recipe type so the user can see craft vs smelt at a glance
         local TYPE_COLOUR = {
             craft            = G.SUCCESS_FG,
             smelt            = G.WARN_FG,
@@ -298,11 +312,13 @@ local function renderCrafting()
             create_compacting= G.HIGHLIGHT,
         }
         for _, entry in ipairs(nowList) do
-            local short = entry.name:match(":(.+)$") or entry.name
-            local rtype = entry.recipe.type or "craft"
-            local have  = Storage.count(entry.name)
-            lines[#lines + 1] = {
-                text = string.format("  %-28s [%-8s] have %s",
+            local short    = entry.name:match(":(.+)$") or entry.name
+            local rtype    = entry.recipe.type or "craft"
+            local have     = Storage.count(entry.name)
+            local lineIdx  = #lines + 1
+            craftingItemMap[lineIdx] = entry.name
+            lines[lineIdx] = {
+                text = string.format("  %-26s [%-8s] have %s",
                     short, rtype, Utils.formatNumber(have)),
                 fg = TYPE_COLOUR[rtype] or G.SUCCESS_FG,
             }
@@ -320,17 +336,21 @@ local function renderCrafting()
             local short   = name:match(":(.+)$") or name
             local have    = Storage.count(name)
             local canNow  = nowMap[name] ~= nil
-            -- Dim items that aren't currently craftable; highlight items that are
-            local fg = canNow and G.SUCCESS_FG or G.DIM_FG
-            lines[#lines + 1] = {
-                text = string.format("  %-30s  have %s%s",
-                    short, Utils.formatNumber(have), canNow and "  ✓" or ""),
+            local recipe  = RM.bestFor(name)
+            local rtype   = recipe and recipe.type or "?"
+            -- Dim items not craftable now; highlight those that are ready
+            local fg      = canNow and G.SUCCESS_FG or G.DIM_FG
+            local lineIdx = #lines + 1
+            craftingItemMap[lineIdx] = name
+            lines[lineIdx] = {
+                text = string.format("  %-24s [%-12s] %s%s",
+                    short, rtype, Utils.formatNumber(have), canNow and " \x1b" or ""),
                 fg = fg,
             }
         end
     end
 
-    -- ── Recipe source info row (shows where recipes came from) ────────────────
+    -- ── Recipe source info row ────────────────────────────────────────────────
     local srcInfo = RecipeScanner.sourceSummary()
     lines[#lines + 1] = { text = "", fg = G.BODY_FG }
     lines[#lines + 1] = {
@@ -512,29 +532,54 @@ end
 -- Tab-specific Enter action
 local function handleEnter()
     local tab = TABS[currentTab]
-    if tab.id == "crafting" then
-        -- Get craftable items list
-        local craftable = RM.craftableItems()
-        local idx = cursor[3]
-        -- Account for the header lines in the list (2 for "Queued Jobs" section)
-        -- This is simplified; a production implementation would track line→item mapping
-        local queueLines = #Crafting.getQueue()
-        local headerOffset = 3 + queueLines + (queueLines == 0 and 1 or 0) + 2
-        local itemIdx = idx - headerOffset
-        if itemIdx >= 1 and itemIdx <= #craftable then
-            local itemName = craftable[itemIdx]
-            startInput("Craft how many " .. (itemName:match(":(.+)$") or itemName) .. "?",
+
+    if tab.id == "storage" then
+        -- Retrieve item: push the selected item from storage to the output chest(s).
+        local items = Storage.sortedItems()
+        local idx   = cursor[2]
+        if idx >= 1 and idx <= #items then
+            local itemName = items[idx]
+            local have     = Storage.count(itemName)
+            local short    = itemName:match(":(.+)$") or itemName
+            startInput(
+                string.format("Retrieve %s (have %s, 0=all):", short, Utils.formatNumber(have)),
                 function(s)
                     local n = tonumber(s)
-                    if n and n > 0 then
-                        Crafting.queue(itemName, n)
-                        Logger.info("GUI: queued craft %d × %s", n, itemName)
+                    if n then
+                        local amount = (n > 0) and n or have
+                        if amount > 0 then
+                            local moved = Storage.exportToOutputs(itemName, amount)
+                            Logger.info("GUI: retrieved %d × %s to output", moved, itemName)
+                        end
                     end
                 end)
         end
+
+    elseif tab.id == "crafting" then
+        -- Use the craftingItemMap populated by renderCrafting to find the selected item.
+        -- This correctly handles any cursor position regardless of section sizes.
+        local itemName = craftingItemMap[cursor[3]]
+        if itemName then
+            local short = itemName:match(":(.+)$") or itemName
+            startInput("Queue how many " .. short .. "?",
+                function(s)
+                    local n = tonumber(s)
+                    if n and n > 0 then
+                        local recipe = RM.bestFor(itemName)
+                        if recipe and recipe.type == "craft" then
+                            Crafting.queue(itemName, n)
+                            Logger.info("GUI: queued craft %d × %s", n, itemName)
+                        elseif recipe then
+                            Processing.queue(itemName, n)
+                            Logger.info("GUI: queued process %d × %s", n, itemName)
+                        end
+                    end
+                end)
+        end
+
     elseif tab.id == "processing" then
-        -- Queue smelting job for selected item
-        startInput("Smelt item name (e.g. minecraft:raw_iron):",
+        -- Queue a processing job by typing the item name manually.
+        startInput("Item name (e.g. minecraft:raw_iron):",
             function(s)
                 s = Utils.trim(s)
                 if s ~= "" then
@@ -610,11 +655,12 @@ function GUI.run()
             draw()
 
         elseif event == "timer" then
-            -- Reschedule our own refresh timer so the GUI keeps ticking
+            -- Only redraw for our own refresh timer; ignore timers fired by
+            -- background tasks (sleep() calls) to prevent constant flickering.
             if p1 == refreshTimer then
                 refreshTimer = os.startTimer(Config.GUI_REFRESH)
+                draw()
             end
-            draw()
 
         elseif event == "peripheral" or event == "peripheral_detach" then
             Network.handleEvent(event, p1)

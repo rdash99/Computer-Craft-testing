@@ -185,28 +185,39 @@ end
 
 --- Return a map of { itemName → recipe } for items that can be produced RIGHT NOW.
 --- An item is "craftable now" when every required ingredient (for the best matching
---- recipe) is currently available in storage in sufficient quantity.
+--- recipe) is currently available in storage in sufficient quantity, AND the machine
+--- needed to execute that recipe type is present on the network.
 ---
 --- `getCountFn` is a function(itemName) → number that returns the current stored
 --- count of an item.  Pass `Storage.count` from storage.lua.
 ---
+--- `recipeTypeOkFn` is an optional function(recipeType) → boolean.  When provided,
+--- a recipe is only considered executable if `recipeTypeOkFn(recipe.type)` returns
+--- true.  Use this to filter out recipes whose machine (press, furnace, etc.) is
+--- absent from the network.
+---
 --- All recipe types are checked (craft, smelt, blast, smoke, create_*) so the
 --- result covers both crafting and processing jobs.
-function RecipeManager.craftableNow(getCountFn)
+function RecipeManager.craftableNow(getCountFn, recipeTypeOkFn)
     local out = {}
     for name, recipeList in pairs(byOutput) do
         for _, recipe in ipairs(recipeList) do
-            local ingredients = RecipeManager.ingredients(recipe)
-            local canMake = true
-            for item, needed in pairs(ingredients) do
-                if (getCountFn(item) or 0) < needed then
-                    canMake = false
-                    break
+            -- Skip recipes whose required machine is not available
+            if recipeTypeOkFn and not recipeTypeOkFn(recipe.type) then
+                -- cannot execute this recipe type right now; try next recipe
+            else
+                local ingredients = RecipeManager.ingredients(recipe)
+                local canMake = true
+                for item, needed in pairs(ingredients) do
+                    if (getCountFn(item) or 0) < needed then
+                        canMake = false
+                        break
+                    end
                 end
-            end
-            -- Only record the first (best) matchable recipe per output item
-            if canMake and not out[name] then
-                out[name] = recipe
+                -- Only record the first (best) matchable recipe per output item
+                if canMake and not out[name] then
+                    out[name] = recipe
+                end
             end
         end
     end
